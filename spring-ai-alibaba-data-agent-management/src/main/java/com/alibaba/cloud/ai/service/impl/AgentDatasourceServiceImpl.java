@@ -128,13 +128,13 @@ public class AgentDatasourceServiceImpl implements AgentDatasourceService {
 	}
 
 	@Override
+	@Transactional
 	public AgentDatasource toggleDatasourceForAgent(Integer agentId, Integer datasourceId, Boolean isActive) {
-		// If enabling data source, first check if there are other enabled data sources
+		// If enabling data source, automatically disable other data sources
 		if (isActive) {
-			int activeCount = agentDatasourceMapper.countActiveByAgentIdExcluding(agentId, datasourceId);
-			if (activeCount > 0) {
-				throw new RuntimeException("同一智能体下只能启用一个数据源，请先禁用其他数据源后再启用此数据源");
-			}
+			log.info("启用数据源 {} for agent {}, 自动禁用其他数据源", datasourceId, agentId);
+			// Disable all other data sources for this agent
+			agentDatasourceMapper.disableAllByAgentId(agentId);
 		}
 
 		// Update data source status
@@ -143,6 +143,8 @@ public class AgentDatasourceServiceImpl implements AgentDatasourceService {
 		if (updated == 0) {
 			throw new RuntimeException("未找到相关的数据源关联记录");
 		}
+
+		log.info("数据源状态更新成功: agentId={}, datasourceId={}, isActive={}", agentId, datasourceId, isActive);
 
 		// Return the updated association record
 		return agentDatasourceMapper.selectByAgentIdAndDatasourceId(agentId, datasourceId);

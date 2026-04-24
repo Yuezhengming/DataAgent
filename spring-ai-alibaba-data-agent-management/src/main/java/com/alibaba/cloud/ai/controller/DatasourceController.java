@@ -128,4 +128,31 @@ public class DatasourceController {
 		}
 	}
 
+	/**
+	 * Create file-based data source (CSV/Excel)
+	 */
+	@PostMapping("/file")
+	public ResponseEntity<ApiResponse> createFileDatasource(@RequestBody Datasource datasource) {
+		try {
+			// Validate file datasource
+			if (datasource.getFilePath() == null || datasource.getFilePath().isEmpty()) {
+				return ResponseEntity.badRequest().body(ApiResponse.error("文件路径不能为空"));
+			}
+
+			if (datasource.getFileType() == null || datasource.getFileType().isEmpty()) {
+				return ResponseEntity.badRequest().body(ApiResponse.error("文件类型不能为空"));
+			}
+
+			// Set default values for file datasource
+			datasource.setStatus("active");
+			datasource.setTestStatus("success");
+
+			Datasource created = datasourceService.createDatasource(datasource);
+			return ResponseEntity.ok(ApiResponse.success("文件数据源创建成功", created));
+		}
+		catch (Exception e) {
+			return ResponseEntity.badRequest().body(ApiResponse.error("创建失败：" + e.getMessage()));
+		}
+	}
+
 }

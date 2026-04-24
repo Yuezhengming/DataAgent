@@ -44,8 +44,8 @@ public interface DatasourceMapper {
 
 	@Insert("""
 			INSERT INTO datasource
-			    (name, type, host, port, database_name, username, password, connection_url, status, test_status, description, creator_id, create_time, update_time)
-			VALUES (#{name}, #{type}, #{host}, #{port}, #{databaseName}, #{username}, #{password}, #{connectionUrl}, #{status}, #{testStatus}, #{description}, #{creatorId}, NOW(), NOW())
+			    (name, type, host, port, database_name, username, password, connection_url, status, test_status, description, creator_id, file_path, file_type, original_filename, create_time, update_time)
+			VALUES (#{name}, #{type}, #{host}, #{port}, #{databaseName}, #{username}, #{password}, #{connectionUrl}, #{status}, #{testStatus}, #{description}, #{creatorId}, #{filePath}, #{fileType}, #{originalFilename}, NOW(), NOW())
 			""")
 	@Options(useGeneratedKeys = true, keyProperty = "id", keyColumn = "id")
 	int insert(Datasource datasource);
@@ -69,6 +69,9 @@ public interface DatasourceMapper {
 			    <if test="testStatus != null">test_status = #{testStatus},</if>
 			    <if test="description != null">description = #{description},</if>
 			    <if test="creatorId != null">creator_id = #{creatorId},</if>
+			    <if test="filePath != null">file_path = #{filePath},</if>
+			    <if test="fileType != null">file_type = #{fileType},</if>
+			    <if test="originalFilename != null">original_filename = #{originalFilename},</if>
 			    update_time = NOW()
 			</set>
 			WHERE id = #{id}

@@ -200,6 +200,20 @@
             <version>${elasticsearch-client.version}</version>
         </dependency>
 
+        <!-- CSV parsing -->
+        <dependency>
+            <groupId>com.opencsv</groupId>
+            <artifactId>opencsv</artifactId>
+            <version>5.7.1</version>
+        </dependency>
+
+        <!-- Excel parsing -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.2.3</version>
+        </dependency>
+
     </dependencies>
     <repositories>
         <repository>

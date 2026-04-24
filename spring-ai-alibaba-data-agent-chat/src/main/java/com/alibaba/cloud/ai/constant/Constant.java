@@ -156,4 +156,11 @@ public final class Constant {
 	// knowledgeId
 	public static final String KNOWLEDGE_ID = "knowledgeId";
 
+	// File datasource related
+	public static final String IS_FILE_DATASOURCE = "IS_FILE_DATASOURCE";
+
+	public static final String FILE_DATASOURCE_PATH = "FILE_DATASOURCE_PATH";
+
+	public static final String FILE_DATASOURCE_TYPE = "FILE_DATASOURCE_TYPE";
+
 }

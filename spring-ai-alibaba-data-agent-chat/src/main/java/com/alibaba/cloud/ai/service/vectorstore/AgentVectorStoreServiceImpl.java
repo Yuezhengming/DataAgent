@@ -72,6 +72,12 @@ public class AgentVectorStoreServiceImpl implements AgentVectorStoreService {
 
 	protected final TableMetadataService tableMetadataService;
 
+	private com.alibaba.cloud.ai.service.file.FileDataSourceService fileDataSourceService;
+
+	private com.alibaba.cloud.ai.service.datasource.DatasourceService datasourceService;
+
+	private com.alibaba.cloud.ai.config.file.FileStorageProperties fileStorageProperties;
+
 	public AgentVectorStoreServiceImpl(VectorStore vectorStore, ExecutorService dbOperationExecutor,
 			BatchingStrategy batchingStrategy, AccessorFactory accessorFactory,
 			TableMetadataService tableMetadataService) {
@@ -81,6 +87,22 @@ public class AgentVectorStoreServiceImpl implements AgentVectorStoreService {
 		this.accessorFactory = accessorFactory;
 		this.tableMetadataService = tableMetadataService;
 		log.info("VectorStore type: {}", vectorStore.getClass().getSimpleName());
+	}
+
+	// Setter injection for optional dependencies (to avoid circular dependency)
+	@org.springframework.beans.factory.annotation.Autowired(required = false)
+	public void setFileDataSourceService(com.alibaba.cloud.ai.service.file.FileDataSourceService fileDataSourceService) {
+		this.fileDataSourceService = fileDataSourceService;
+	}
+
+	@org.springframework.beans.factory.annotation.Autowired(required = false)
+	public void setDatasourceService(com.alibaba.cloud.ai.service.datasource.DatasourceService datasourceService) {
+		this.datasourceService = datasourceService;
+	}
+
+	@org.springframework.beans.factory.annotation.Autowired(required = false)
+	public void setFileStorageProperties(com.alibaba.cloud.ai.config.file.FileStorageProperties fileStorageProperties) {
+		this.fileStorageProperties = fileStorageProperties;
 	}
 
 	@Override
@@ -110,6 +132,16 @@ public class AgentVectorStoreServiceImpl implements AgentVectorStoreService {
 	public Boolean schema(String agentId, SchemaInitRequest schemaInitRequest) throws Exception {
 		log.info("Starting schema initialization for agent: {}", agentId);
 		DbConfig config = schemaInitRequest.getDbConfig();
+
+		// Check if it's a file datasource (CSV or Excel)
+		boolean isFileDatasource = "file".equalsIgnoreCase(config.getDialectType());
+
+		if (isFileDatasource) {
+			log.info("Detected file datasource for agent: {}, using file-based schema initialization", agentId);
+			return initializeFileDataSourceSchema(agentId, schemaInitRequest);
+		}
+
+		// For database datasources, use the original logic
 		DbQueryParameter dqp = DbQueryParameter.from(config)
 			.setSchema(config.getSchema())
 			.setTables(schemaInitRequest.getTables());
@@ -487,6 +519,149 @@ public class AgentVectorStoreServiceImpl implements AgentVectorStoreService {
 			.similarityThreshold(0.0)
 			.build());
 		return !docs.isEmpty();
+	}
+
+	/**
+	 * Initialize schema for file-based datasources (CSV/Excel)
+	 */
+	private Boolean initializeFileDataSourceSchema(String agentId, SchemaInitRequest schemaInitRequest) {
+		try {
+			log.info("Initializing file datasource schema for agent: {}", agentId);
+
+			// Clear existing schema data
+			clearSchemaDataForAgent(agentId);
+
+			// Get datasource information through agentId
+			if (datasourceService == null) {
+				log.error("DatasourceService is not available, cannot initialize file datasource schema");
+				throw new RuntimeException("DatasourceService is not available");
+			}
+
+			com.alibaba.cloud.ai.entity.Datasource datasource = datasourceService.getActiveDatasourceByAgentId(Integer.valueOf(agentId));
+			if (datasource == null) {
+				log.error("No active datasource found for agent: {}", agentId);
+				throw new RuntimeException("No active datasource found for agent " + agentId);
+			}
+
+			// Parse file schema
+			if (fileDataSourceService == null) {
+				log.error("FileDataSourceService is not available, cannot parse file schema");
+				throw new RuntimeException("FileDataSourceService is not available");
+			}
+
+			String filePath = datasource.getFilePath();
+			String fileType = datasource.getFileType();
+			String tableName = schemaInitRequest.getTables().get(0); // File datasource has only one "table"
+
+			log.info("Parsing file schema: filePath={}, fileType={}, tableName={}", filePath, fileType, tableName);
+
+			// Build full file path
+			String uploadDir = fileStorageProperties != null ? fileStorageProperties.getPath() : "./uploads";
+			java.nio.file.Path fullFilePath = java.nio.file.Paths.get(uploadDir, filePath);
+
+			log.info("Reading file from: {}", fullFilePath.toAbsolutePath());
+
+			// Read file and create MultipartFile for parsing
+			byte[] fileBytes = java.nio.file.Files.readAllBytes(fullFilePath);
+
+			// Create a simple MultipartFile implementation
+			org.springframework.web.multipart.MultipartFile mockFile = new org.springframework.web.multipart.MultipartFile() {
+				@Override
+				public String getName() {
+					return "file";
+				}
+
+				@Override
+				public String getOriginalFilename() {
+					return datasource.getOriginalFilename();
+				}
+
+				@Override
+				public String getContentType() {
+					return "application/octet-stream";
+				}
+
+				@Override
+				public boolean isEmpty() {
+					return fileBytes.length == 0;
+				}
+
+				@Override
+				public long getSize() {
+					return fileBytes.length;
+				}
+
+				@Override
+				public byte[] getBytes() {
+					return fileBytes;
+				}
+
+				@Override
+				public java.io.InputStream getInputStream() {
+					return new java.io.ByteArrayInputStream(fileBytes);
+				}
+
+				@Override
+				public void transferTo(java.io.File dest) throws java.io.IOException {
+					java.nio.file.Files.write(dest.toPath(), fileBytes);
+				}
+			};
+
+			// Parse column information from file
+			List<com.alibaba.cloud.ai.pojo.ColumnInfo> columns = fileDataSourceService.parseFileSchema(mockFile, fileType);
+
+			log.info("Found {} columns in file datasource", columns.size());
+
+			// Create table document
+			Map<String, Object> tableMetadata = new HashMap<>();
+			tableMetadata.put(Constant.AGENT_ID, agentId);
+			tableMetadata.put(Constant.VECTOR_TYPE, Constant.TABLE);
+			tableMetadata.put("tableName", tableName);
+			tableMetadata.put("tableDescription", datasource.getDescription() != null ? datasource.getDescription() : "File datasource: " + datasource.getOriginalFilename());
+			tableMetadata.put("foreignKey", "");
+			tableMetadata.put("columnCount", columns.size());
+
+			String tableContent = String.format("Table: %s\nDescription: %s\nColumns: %d\nType: %s file",
+				tableName,
+				datasource.getDescription() != null ? datasource.getDescription() : datasource.getOriginalFilename(),
+				columns.size(),
+				fileType.toUpperCase()
+			);
+
+			Document tableDoc = new Document(tableContent, tableMetadata);
+
+			// Create column documents
+			List<Document> columnDocs = new ArrayList<>();
+			for (com.alibaba.cloud.ai.pojo.ColumnInfo column : columns) {
+				Map<String, Object> columnMetadata = new HashMap<>();
+				columnMetadata.put(Constant.AGENT_ID, agentId);
+				columnMetadata.put(Constant.VECTOR_TYPE, Constant.COLUMN);
+				columnMetadata.put("tableName", tableName);
+				columnMetadata.put("columnName", column.getColumnName());
+				columnMetadata.put("columnType", column.getColumnType());
+				columnMetadata.put("columnDescription", column.getComment() != null ? column.getComment() : "");
+
+				String columnContent = String.format("Column: %s.%s\nType: %s\nDescription: %s",
+					tableName,
+					column.getColumnName(),
+					column.getColumnType(),
+					column.getComment() != null ? column.getComment() : "No description"
+				);
+
+				columnDocs.add(new Document(columnContent, columnMetadata));
+			}
+
+			// Store documents
+			log.info("Storing {} column documents and 1 table document for file datasource", columnDocs.size());
+			storeSchemaDocuments(columnDocs, List.of(tableDoc));
+
+			log.info("Successfully initialized file datasource schema for agent: {}", agentId);
+			return true;
+
+		} catch (Exception e) {
+			log.error("Failed to initialize file datasource schema for agent: {}", agentId, e);
+			return false;
+		}
 	}
 
 	/**

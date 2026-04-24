@@ -207,6 +207,27 @@ public class DatasourceServiceImpl implements DatasourceService {
 			throw new RuntimeException("Datasource not found with id: " + datasourceId);
 		}
 
+		// Check if it's a file datasource (CSV or Excel)
+		String datasourceType = datasource.getType();
+		if ("csv".equalsIgnoreCase(datasourceType) || "excel".equalsIgnoreCase(datasourceType)) {
+			log.info("Detected file datasource, returning file name as table name");
+			// For file datasources, return the file name (without extension) as the "table" name
+			String fileName = datasource.getOriginalFilename();
+			if (fileName != null) {
+				// Remove file extension
+				int dotIndex = fileName.lastIndexOf('.');
+				String tableName = dotIndex > 0 ? fileName.substring(0, dotIndex) : fileName;
+				log.info("File datasource table name: {}", tableName);
+				return List.of(tableName);
+			}
+			else {
+				// Fallback to datasource name
+				log.info("Using datasource name as table name: {}", datasource.getName());
+				return List.of(datasource.getName());
+			}
+		}
+
+		// For database datasources, use the original logic
 		// Create database configuration
 		DbConfig dbConfig = SchemaProcessorUtil.createDbConfigFromDatasource(datasource);
 

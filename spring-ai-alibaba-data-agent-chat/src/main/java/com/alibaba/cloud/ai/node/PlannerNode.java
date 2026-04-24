@@ -37,7 +37,10 @@ import reactor.core.publisher.Flux;
 import java.util.Map;
 
 import static com.alibaba.cloud.ai.constant.Constant.BUSINESS_KNOWLEDGE;
+import static com.alibaba.cloud.ai.constant.Constant.FILE_DATASOURCE_PATH;
+import static com.alibaba.cloud.ai.constant.Constant.FILE_DATASOURCE_TYPE;
 import static com.alibaba.cloud.ai.constant.Constant.INPUT_KEY;
+import static com.alibaba.cloud.ai.constant.Constant.IS_FILE_DATASOURCE;
 import static com.alibaba.cloud.ai.constant.Constant.IS_ONLY_NL2SQL;
 import static com.alibaba.cloud.ai.constant.Constant.PLANNER_NODE_OUTPUT;
 import static com.alibaba.cloud.ai.constant.Constant.PLAN_VALIDATION_ERROR;
@@ -75,11 +78,27 @@ public class PlannerNode implements NodeAction {
 			log.info("Generating initial plan");
 		}
 
+		// 检查是否为文件数据源
+		Boolean isFileDatasource = state.value(IS_FILE_DATASOURCE, false);
+		String fileDatasourcePath = StateUtil.getStringValue(state, FILE_DATASOURCE_PATH, "");
+		String fileDatasourceType = StateUtil.getStringValue(state, FILE_DATASOURCE_TYPE, "");
+
 		// 构建提示参数
 		String businessKnowledge = (String) state.value(BUSINESS_KNOWLEDGE).orElse("");
 		String semanticModel = (String) state.value(SEMANTIC_MODEL).orElse("");
 		SchemaDTO schemaDTO = StateUtil.getObjectValue(state, TABLE_RELATION_OUTPUT, SchemaDTO.class);
 		String schemaStr = PromptHelper.buildMixMacSqlDbPrompt(schemaDTO, true);
+
+		// 如果是文件数据源，添加特殊说明
+		if (isFileDatasource) {
+			schemaStr = String.format(
+					"**IMPORTANT: This is a FILE-BASED datasource (%s file at: %s)**\n\n"
+							+ "**You MUST use PYTHON_GENERATE_NODE instead of SQL_EXECUTE_NODE for all data operations.**\n"
+							+ "**The Python code should use pandas to read the file: pd.read_%s('%s')**\n\n%s",
+					fileDatasourceType, fileDatasourcePath,
+					"csv".equalsIgnoreCase(fileDatasourceType) ? "csv" : "excel", fileDatasourcePath, schemaStr);
+			log.info("File datasource detected in planner, adjusted schema prompt");
+		}
 
 		// 构建用户提示
 		String userPrompt = buildUserPrompt(processedQuery, validationError, state);

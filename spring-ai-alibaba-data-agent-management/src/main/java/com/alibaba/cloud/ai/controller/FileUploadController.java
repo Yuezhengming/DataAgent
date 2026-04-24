@@ -23,6 +23,9 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.alibaba.cloud.ai.entity.Datasource;
+import com.alibaba.cloud.ai.pojo.ColumnInfo;
+import com.alibaba.cloud.ai.service.file.FileDataSourceService;
 import com.alibaba.cloud.ai.service.file.FileStorageService;
 import com.alibaba.cloud.ai.vo.UploadResponse;
 
@@ -31,6 +34,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 文件上传控制器
@@ -48,6 +53,8 @@ public class FileUploadController {
 	private final FileStorageProperties fileStorageProperties;
 
 	private final FileStorageService fileStorageService;
+
+	private final FileDataSourceService fileDataSourceService;
 
 	/**
 	 * 上传头像图片
@@ -80,6 +87,57 @@ public class FileUploadController {
 		catch (Exception e) {
 			log.error("头像上传失败", e);
 			return ResponseEntity.internalServerError().body(UploadResponse.error("上传失败: " + e.getMessage()));
+		}
+	}
+
+	/**
+	 * 上传数据文件（CSV/Excel）并解析Schema
+	 */
+	@PostMapping(value = "/dataset", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public ResponseEntity<Map<String, Object>> uploadDataset(@RequestParam("file") MultipartFile file) {
+		try {
+			// 验证文件类型
+			String originalFilename = file.getOriginalFilename();
+			if (originalFilename == null) {
+				return ResponseEntity.badRequest().body(Map.of("success", false, "message", "文件名不能为空"));
+			}
+
+			String lowerFilename = originalFilename.toLowerCase();
+			if (!lowerFilename.endsWith(".csv") && !lowerFilename.endsWith(".xlsx")
+					&& !lowerFilename.endsWith(".xls")) {
+				return ResponseEntity.badRequest()
+					.body(Map.of("success", false, "message", "只支持 CSV 和 Excel 文件"));
+			}
+
+			// 校验文件大小 (最大 100MB)
+			long maxFileSize = 100L * 1024 * 1024;
+			if (file.getSize() > maxFileSize) {
+				return ResponseEntity.badRequest()
+					.body(Map.of("success", false, "message", "文件大小超限，最大允许 100MB"));
+			}
+
+			// 确定文件类型
+			String fileType = lowerFilename.endsWith(".csv") ? "csv" : "excel";
+
+			// 解析文件Schema
+			List<ColumnInfo> columns = fileDataSourceService.parseFileSchema(file, fileType);
+
+			// 存储文件
+			String filePath = fileStorageService.storeFile(file, "datasets");
+			String fileUrl = fileStorageService.getFileUrl(filePath);
+
+			// 获取预览数据
+			String previewData = fileDataSourceService.getFilePreview(filePath, fileType, 5);
+
+			return ResponseEntity.ok(Map.of("success", true, "message", "文件上传成功", "filePath", filePath, "fileUrl",
+					fileUrl, "fileType", fileType, "originalFilename", originalFilename, "columns", columns,
+					"preview", previewData));
+
+		}
+		catch (Exception e) {
+			log.error("数据文件上传失败", e);
+			return ResponseEntity.internalServerError()
+				.body(Map.of("success", false, "message", "上传失败: " + e.getMessage()));
 		}
 	}
 

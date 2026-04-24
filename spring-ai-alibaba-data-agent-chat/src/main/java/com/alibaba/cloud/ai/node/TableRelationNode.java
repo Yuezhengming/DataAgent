@@ -95,6 +95,14 @@ public class TableRelationNode implements NodeAction {
 		if (!StringUtils.hasText(agentIdStr))
 			throw new RuntimeException("Agent ID is empty.");
 
+		// Get datasource to check if it's a file datasource
+		Datasource agentDatasource = datasourceService.getActiveDatasourceByAgentId(Integer.valueOf(agentIdStr));
+		if (agentDatasource == null)
+			throw new RuntimeException("No active datasource found for agent " + agentIdStr);
+
+		boolean isFileDatasource = "csv".equalsIgnoreCase(agentDatasource.getType())
+				|| "excel".equalsIgnoreCase(agentDatasource.getType());
+
 		// Execute business logic first - get final result immediately
 		DbConfig agentDbConfig = getAgentDbConfig(Integer.valueOf(agentIdStr));
 		SchemaDTO schemaDTO = buildInitialSchema(agentIdStr, columnDocumentsByKeywords, tableDocuments, agentDbConfig);
@@ -145,9 +153,27 @@ public class TableRelationNode implements NodeAction {
 		Flux<GraphResponse<StreamingOutput>> generator = FluxUtil.createStreamingGeneratorWithMessages(this.getClass(),
 				state, v -> resultMap, displayFlux);
 
-		// need to reset retry count and exception
-		return Map.of(TABLE_RELATION_OUTPUT, generator, BUSINESS_KNOWLEDGE, businessKnowledgePrompt, SEMANTIC_MODEL,
-				semanticModelPrompt, TABLE_RELATION_RETRY_COUNT, 0, TABLE_RELATION_EXCEPTION_OUTPUT, "");
+		// Build result map with file datasource flags if applicable
+		Map<String, Object> result = new HashMap<>();
+		result.put(TABLE_RELATION_OUTPUT, generator);
+		result.put(BUSINESS_KNOWLEDGE, businessKnowledgePrompt);
+		result.put(SEMANTIC_MODEL, semanticModelPrompt);
+		result.put(TABLE_RELATION_RETRY_COUNT, 0);
+		result.put(TABLE_RELATION_EXCEPTION_OUTPUT, "");
+
+		// Add file datasource information to state
+		if (isFileDatasource) {
+			result.put(IS_FILE_DATASOURCE, true);
+			result.put(FILE_DATASOURCE_PATH, agentDatasource.getFilePath());
+			result.put(FILE_DATASOURCE_TYPE, agentDatasource.getFileType());
+			log.info("File datasource detected: type={}, path={}", agentDatasource.getFileType(),
+					agentDatasource.getFilePath());
+		}
+		else {
+			result.put(IS_FILE_DATASOURCE, false);
+		}
+
+		return result;
 
 	}
 
@@ -180,7 +206,20 @@ public class TableRelationNode implements NodeAction {
 		if (agentDatasource == null)
 			throw new RuntimeException("No active datasource found for agent " + agentId);
 
-		// Convert to DbConfig
+		// Check if it's a file datasource (CSV or Excel)
+		String datasourceType = agentDatasource.getType();
+		if ("csv".equalsIgnoreCase(datasourceType) || "excel".equalsIgnoreCase(datasourceType)) {
+			log.info("Detected file datasource for agent {}: type={}, file={}", agentId, datasourceType,
+					agentDatasource.getFilePath());
+			// For file datasources, we don't need a real DbConfig
+			// Return a minimal DbConfig to avoid null pointer exceptions
+			DbConfig dbConfig = new DbConfig();
+			dbConfig.setDialectType("file");
+			dbConfig.setSchema(agentDatasource.getName());
+			return dbConfig;
+		}
+
+		// Convert to DbConfig for traditional databases
 		DbConfig dbConfig = SchemaProcessorUtil.createDbConfigFromDatasource(agentDatasource);
 		log.debug("Successfully created DbConfig for agent {}: url={}, schema={}, type={}", agentId, dbConfig.getUrl(),
 				dbConfig.getSchema(), dbConfig.getDialectType());

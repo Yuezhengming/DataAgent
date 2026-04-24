@@ -40,7 +40,11 @@ public enum BizDataSourceTypeEnum {
 	MYSQL_VIRTUAL(51, "mysql-virtual", DatabaseDialectEnum.MYSQL.getCode(), DbAccessTypeEnum.MEMORY.getCode()),
 
 	POSTGRESQL_VIRTUAL(52, "postgresql-virtual", DatabaseDialectEnum.POSTGRESQL.getCode(),
-			DbAccessTypeEnum.MEMORY.getCode());
+			DbAccessTypeEnum.MEMORY.getCode()),
+
+	CSV_FILE(61, "csv", DatabaseDialectEnum.MYSQL.getCode(), DbAccessTypeEnum.MEMORY.getCode()),
+
+	EXCEL_FILE(62, "excel", DatabaseDialectEnum.MYSQL.getCode(), DbAccessTypeEnum.MEMORY.getCode());
 
 	public final Integer code;
 

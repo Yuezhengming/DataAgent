@@ -27,17 +27,30 @@ public class SchemaProcessorUtil {
 	public static DbConfig createDbConfigFromDatasource(Datasource datasource) {
 		DbConfig dbConfig = new DbConfig();
 
-		// Set basic connection information
+		// Check if it's a file datasource (CSV or Excel)
+		String datasourceType = datasource.getType();
+		if ("csv".equalsIgnoreCase(datasourceType) || "excel".equalsIgnoreCase(datasourceType)) {
+			// For file datasources, set dialectType to "file"
+			dbConfig.setDialectType("file");
+			dbConfig.setConnectionType("file");
+			// Use datasource name as schema
+			dbConfig.setSchema(datasource.getName());
+			// Store file path in URL field for later retrieval
+			dbConfig.setUrl(datasource.getFilePath());
+			return dbConfig;
+		}
+
+		// For database datasources, set basic connection information
 		dbConfig.setUrl(datasource.getConnectionUrl());
 		dbConfig.setUsername(datasource.getUsername());
 		dbConfig.setPassword(datasource.getPassword());
 
 		// TODO Set database type need to be optimized
-		if ("mysql".equalsIgnoreCase(datasource.getType())) {
+		if ("mysql".equalsIgnoreCase(datasourceType)) {
 			dbConfig.setConnectionType("jdbc");
 			dbConfig.setDialectType("mysql");
 		}
-		else if ("h2".equalsIgnoreCase(datasource.getType())) {
+		else if ("h2".equalsIgnoreCase(datasourceType)) {
 			dbConfig.setConnectionType("jdbc");
 			dbConfig.setDialectType("h2");
 		}

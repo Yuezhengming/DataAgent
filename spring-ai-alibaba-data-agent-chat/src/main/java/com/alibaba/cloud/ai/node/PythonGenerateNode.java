@@ -40,6 +40,9 @@ import reactor.core.publisher.Flux;
 import java.util.List;
 import java.util.Map;
 
+import static com.alibaba.cloud.ai.constant.Constant.FILE_DATASOURCE_PATH;
+import static com.alibaba.cloud.ai.constant.Constant.FILE_DATASOURCE_TYPE;
+import static com.alibaba.cloud.ai.constant.Constant.IS_FILE_DATASOURCE;
 import static com.alibaba.cloud.ai.constant.Constant.PYTHON_EXECUTE_NODE_OUTPUT;
 import static com.alibaba.cloud.ai.constant.Constant.PYTHON_GENERATE_NODE_OUTPUT;
 import static com.alibaba.cloud.ai.constant.Constant.PYTHON_IS_SUCCESS;
@@ -108,13 +111,32 @@ public class PythonGenerateNode extends AbstractPlanBasedNode implements NodeAct
 
 		ExecutionStep.ToolParameters toolParameters = executionStep.getToolParameters();
 
+		// Check if it's a file datasource
+		Boolean isFileDatasource = state.value(IS_FILE_DATASOURCE, false);
+		String fileDatasourcePath = StateUtil.getStringValue(state, FILE_DATASOURCE_PATH, "");
+		String fileDatasourceType = StateUtil.getStringValue(state, FILE_DATASOURCE_TYPE, "");
+
+		// Prepare sample input - for file datasources, provide file reading instructions
+		String sampleInputStr;
+		if (isFileDatasource) {
+			String readMethod = "csv".equalsIgnoreCase(fileDatasourceType) ? "pd.read_csv" : "pd.read_excel";
+			sampleInputStr = String.format(
+					"[{\"data_source\": \"file\", \"file_type\": \"%s\", \"file_path\": \"%s\", \"read_method\": \"%s\"}]",
+					fileDatasourceType, fileDatasourcePath, readMethod);
+			log.info("File datasource detected in Python generator: type={}, path={}", fileDatasourceType,
+					fileDatasourcePath);
+		}
+		else {
+			sampleInputStr = objectMapper
+				.writeValueAsString(sqlResults.stream().limit(SAMPLE_DATA_NUMBER).toList());
+		}
+
 		// Load Python code generation template
 		String systemPrompt = PromptConstant.getPythonGeneratorPromptTemplate()
 			.render(Map.of("python_memory", codeExecutorProperties.getLimitMemory().toString(), "python_timeout",
 					codeExecutorProperties.getCodeTimeout(), "database_schema",
-					objectMapper.writeValueAsString(schemaDTO), "sample_input",
-					objectMapper.writeValueAsString(sqlResults.stream().limit(SAMPLE_DATA_NUMBER).toList()),
-					"plan_description", objectMapper.writeValueAsString(toolParameters)));
+					objectMapper.writeValueAsString(schemaDTO), "sample_input", sampleInputStr, "plan_description",
+					objectMapper.writeValueAsString(toolParameters)));
 
 		Flux<ChatResponse> pythonGenerateFlux = llmService.call(systemPrompt, userPrompt);
 

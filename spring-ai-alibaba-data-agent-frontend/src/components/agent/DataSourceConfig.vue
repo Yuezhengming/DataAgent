@@ -67,6 +67,106 @@
   <!-- 添加数据源Dialog -->
   <el-dialog v-model="dialogVisible" title="添加数据源" width="1000">
     <el-tabs v-model="dialogActiveName" type="card" stretch>
+      <el-tab-pane label="上传文件数据源" name="file">
+        <div style="padding: 20px;">
+          <el-alert
+            title="支持上传 CSV 和 Excel 文件作为数据源"
+            type="info"
+            :closable="false"
+            style="margin-bottom: 20px;"
+          >
+            <template #default>
+              <p>• 支持的文件格式：.csv, .xlsx, .xls</p>
+              <p>• 文件大小限制：100MB</p>
+              <p>• 上传后将自动解析文件结构</p>
+            </template>
+          </el-alert>
+
+          <el-upload
+            ref="uploadRef"
+            class="upload-demo"
+            drag
+            :auto-upload="false"
+            :on-change="handleFileChange"
+            :limit="1"
+            accept=".csv,.xlsx,.xls"
+            :file-list="fileList"
+          >
+            <el-icon class="el-icon--upload"><upload-filled /></el-icon>
+            <div class="el-upload__text">
+              拖拽文件到此处或 <em>点击上传</em>
+            </div>
+            <template #tip>
+              <div class="el-upload__tip">
+                支持 CSV 和 Excel 文件（.csv, .xlsx, .xls）
+              </div>
+            </template>
+          </el-upload>
+
+          <!-- 文件预览 -->
+          <div v-if="filePreview.columns && filePreview.columns.length > 0" style="margin-top: 30px;">
+            <h3>文件预览</h3>
+            <el-divider/>
+
+            <el-descriptions :column="2" border style="margin-bottom: 20px;">
+              <el-descriptions-item label="文件名">{{ filePreview.fileName }}</el-descriptions-item>
+              <el-descriptions-item label="文件类型">{{ filePreview.fileType }}</el-descriptions-item>
+              <el-descriptions-item label="列数">{{ filePreview.columns.length }}</el-descriptions-item>
+              <el-descriptions-item label="数据行数">{{ filePreview.previewData ? filePreview.previewData.length : 0 }}</el-descriptions-item>
+            </el-descriptions>
+
+            <h4>列信息</h4>
+            <el-table :data="filePreview.columns" border style="margin-bottom: 20px;">
+              <el-table-column prop="columnName" label="列名" width="200"/>
+              <el-table-column prop="columnType" label="数据类型" width="120"/>
+              <el-table-column prop="comment" label="说明" />
+            </el-table>
+
+            <h4>数据预览（前5行）</h4>
+            <el-table :data="filePreview.previewData" border max-height="300">
+              <el-table-column
+                v-for="col in filePreview.columns"
+                :key="col.columnName"
+                :prop="col.columnName"
+                :label="col.columnName"
+                min-width="120"
+              />
+            </el-table>
+
+            <!-- 数据源配置 -->
+            <div style="margin-top: 30px;">
+              <h4>数据源配置</h4>
+              <el-row :gutter="20">
+                <el-col :span="12">
+                  <div class="form-item">
+                    <label>数据源名称 *</label>
+                    <el-input v-model="fileDatasource.name" placeholder="请输入数据源名称" size="large"/>
+                  </div>
+                </el-col>
+                <el-col :span="12">
+                  <div class="form-item">
+                    <label>描述</label>
+                    <el-input v-model="fileDatasource.description" placeholder="请输入描述（可选）" size="large"/>
+                  </div>
+                </el-col>
+              </el-row>
+            </div>
+          </div>
+
+          <el-divider/>
+          <div style="text-align: right;">
+            <el-button @click="dialogVisible = false">取消</el-button>
+            <el-button
+              type="primary"
+              @click="createFileDatasource"
+              :disabled="!filePreview.filePath || !fileDatasource.name"
+              :loading="uploadingFile"
+            >
+              创建文件数据源
+            </el-button>
+          </div>
+        </div>
+      </el-tab-pane>
       <el-tab-pane label="选择已有数据源" name="select">
         <!-- todo: 添加分页和查询 -->
         <el-table @current-change="handleSelectDatasourceChange" :data="allDatasource" highlight-current-row style="width: 100%">
@@ -288,18 +388,41 @@ export default defineComponent({
     const datasource : Ref<Datasource[]> = ref([])
     const initStatus : Ref<boolean> = ref(false)
     const dialogVisible : Ref<boolean> = ref(false)
-    const dialogActiveName : Ref<string> = ref('select')
+    const dialogActiveName : Ref<string> = ref('file')
     // 所有数据源列表
     const allDatasource : Ref<Datasource[]> = ref([])
     const newDatasource : Ref<Datasource> = ref({ port: 3306 } as Datasource)
     const selectedDatasourceId : Ref<number | null> = ref(null)
     const editDialogVisible : Ref<boolean> = ref(false)
-    const editingDatasource : Ref<Datasource> = ref({} as Datasource)  
+    const editingDatasource : Ref<Datasource> = ref({} as Datasource)
+
+    // 文件上传相关
+    const uploadRef = ref()
+    const fileList : Ref<any[]> = ref([])
+    const uploadingFile : Ref<boolean> = ref(false)
+    const filePreview : Ref<any> = ref({
+      fileName: '',
+      fileType: '',
+      filePath: '',
+      columns: [],
+      previewData: []
+    })
+    const fileDatasource : Ref<Datasource> = ref({} as Datasource)
 
     watch(dialogVisible, (newValue) => {
       if (newValue) {
         loadAllDatasource()
         newDatasource.value = { port: 3306 } as Datasource
+        // 重置文件上传相关状态
+        fileList.value = []
+        filePreview.value = {
+          fileName: '',
+          fileType: '',
+          filePath: '',
+          columns: [],
+          previewData: []
+        }
+        fileDatasource.value = {} as Datasource
       }
     })
 
@@ -382,17 +505,40 @@ export default defineComponent({
     // 更改数据源状态
     const changeDatasource = async (row : Datasource, active : boolean) => {
       const datasourceId = row.id;
+
+      // 如果是启用操作，检查是否有其他启用的数据源
+      if (active) {
+        const activeCount = datasource.value.filter(d => d.status === 'active' && d.id !== datasourceId).length
+        if (activeCount > 0) {
+          try {
+            await ElMessageBox.confirm(
+              '启用此数据源将自动禁用其他已启用的数据源，是否继续？',
+              '提示',
+              {
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+                type: 'warning'
+              }
+            )
+          } catch {
+            return // 用户取消操作
+          }
+        }
+      }
+
       try {
         const response : ApiResponse = await agentDatasourceService.toggleDatasourceForAgent(props.agentId, { datasourceId: datasourceId, isActive: active});
         if(response.success) {
-          ElMessage.success('操作成功！')
-          row.status = active ? 'active' : 'inactive'
+          ElMessage.success(active ? '数据源已启用，其他数据源已自动禁用' : '数据源已禁用')
+          // 重新加载数据源列表以确保状态同步
+          await loadAgentDatasource()
         } else {
-          ElMessage.error('操作失败！')
+          ElMessage.error(response.message || '操作失败！')
           console.error('Failed to change datasource:', response)
         }
-      } catch (error) {
-        ElMessage.error('操作失败！')
+      } catch (error: any) {
+        const errorMsg = error?.response?.data?.message || error?.message || '操作失败'
+        ElMessage.error(errorMsg)
         console.error('Failed to change datasource:', error)
       }
     }
@@ -579,6 +725,134 @@ export default defineComponent({
       }
     }
 
+    // 文件上传相关方法
+    const handleFileChange = async (file: any, fileListParam: any[]) => {
+      fileList.value = fileListParam
+
+      if (!file || !file.raw) {
+        return
+      }
+
+      // 验证文件类型
+      const fileName = file.name
+      const fileExtension = fileName.substring(fileName.lastIndexOf('.')).toLowerCase()
+      if (!['.csv', '.xlsx', '.xls'].includes(fileExtension)) {
+        ElMessage.error('只支持 CSV 和 Excel 文件（.csv, .xlsx, .xls）')
+        fileList.value = []
+        return
+      }
+
+      // 验证文件大小（100MB）
+      const maxSize = 100 * 1024 * 1024
+      if (file.size > maxSize) {
+        ElMessage.error('文件大小不能超过 100MB')
+        fileList.value = []
+        return
+      }
+
+      // 上传文件并解析
+      uploadingFile.value = true
+      try {
+        const response = await datasourceService.uploadDataset(file.raw)
+
+        console.log('Upload response:', response) // 调试日志
+
+        if (response && response.success) {
+          // 解析预览数据（可能是 JSON 字符串）
+          let previewData = []
+          if (response.preview) {
+            try {
+              previewData = typeof response.preview === 'string'
+                ? JSON.parse(response.preview)
+                : response.preview
+            } catch (e) {
+              console.warn('Failed to parse preview data:', e)
+              previewData = []
+            }
+          }
+
+          filePreview.value = {
+            fileName: response.originalFilename || fileName,
+            fileType: response.fileType || '',
+            filePath: response.filePath || '',
+            columns: response.columns || [],
+            previewData: previewData
+          }
+
+          // 自动填充数据源名称
+          if (!fileDatasource.value.name && fileName) {
+            const nameWithoutExt = fileName.substring(0, fileName.lastIndexOf('.'))
+            fileDatasource.value.name = nameWithoutExt || fileName
+          }
+
+          ElMessage.success('文件上传成功！')
+        } else {
+          const errorMsg = response?.message || '文件上传失败'
+          ElMessage.error(errorMsg)
+          fileList.value = []
+        }
+      } catch (error: any) {
+        const errorMsg = error?.response?.data?.message || error?.message || '文件上传失败'
+        ElMessage.error('文件上传失败：' + errorMsg)
+        console.error('Failed to upload file:', error)
+        fileList.value = []
+      } finally {
+        uploadingFile.value = false
+      }
+    }
+
+    const createFileDatasource = async () => {
+      if (!filePreview.value.filePath) {
+        ElMessage.warning('请先上传文件')
+        return
+      }
+
+      if (!fileDatasource.value.name) {
+        ElMessage.warning('请输入数据源名称')
+        return
+      }
+
+      uploadingFile.value = true
+      try {
+        const datasourceData: Datasource = {
+          name: fileDatasource.value.name,
+          description: fileDatasource.value.description || '',
+          type: filePreview.value.fileType,
+          filePath: filePreview.value.filePath,
+          fileType: filePreview.value.fileType,
+          originalFilename: filePreview.value.fileName,
+          status: 'active',
+          testStatus: 'success'
+        }
+
+        const response = await datasourceService.createFileDatasource(datasourceData)
+
+        if (response.success && response.data) {
+          ElMessage.success('文件数据源创建成功！')
+
+          // 添加到当前智能体
+          const addResponse = await agentDatasourceService.addDatasourceToAgent(
+            String(props.agentId),
+            response.data.id!
+          )
+
+          if (addResponse.success) {
+            ElMessage.success('数据源已添加到当前智能体')
+            dialogVisible.value = false
+            await loadAgentDatasource()
+          } else {
+            ElMessage.warning('数据源创建成功，但添加到智能体失败')
+          }
+        } else {
+          ElMessage.error(response.message || '创建文件数据源失败')
+        }
+      } catch (error) {
+        ElMessage.error('创建文件数据源失败：' + error)
+        console.error('Failed to create file datasource:', error)
+      } finally {
+        uploadingFile.value = false
+      }
+    }
 
     onMounted(() => {
       loadAgentDatasource()
@@ -596,6 +870,11 @@ export default defineComponent({
       newDatasource,
       editDialogVisible,
       editingDatasource,
+      uploadRef,
+      fileList,
+      uploadingFile,
+      filePreview,
+      fileDatasource,
       initAgentDatasource,
       changeDatasource,
       testConnection,
@@ -606,12 +885,49 @@ export default defineComponent({
       handleSelectDatasourceChange,
       editDatasource,
       saveEditDatasource,
-      deleteDatasource
+      deleteDatasource,
+      handleFileChange,
+      createFileDatasource
     }
   }
 })
 </script>
 
 <style scoped>
+.form-item {
+  margin-bottom: 20px;
+}
 
+.form-item label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: #606266;
+}
+
+.upload-demo {
+  width: 100%;
+}
+
+.el-icon--upload {
+  font-size: 67px;
+  color: #409EFF;
+  margin-bottom: 16px;
+}
+
+.el-upload__text {
+  font-size: 14px;
+  color: #606266;
+}
+
+.el-upload__text em {
+  color: #409EFF;
+  font-style: normal;
+}
+
+.el-upload__tip {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 7px;
+}
 </style>

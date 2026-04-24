@@ -31,6 +31,9 @@ interface Datasource {
     testStatus?: string;
     description?: string;
     creatorId?: number;
+    filePath?: string;
+    fileType?: string;
+    originalFilename?: string;
     createTime?: string; // 使用字符串表示日期时间，格式为 "yyyy-MM-dd HH:mm:ss"
     updateTime?: string; // 使用字符串表示日期时间，格式为 "yyyy-MM-dd HH:mm:ss"
 }
@@ -101,6 +104,24 @@ class DatasourceService {
     // 6. 测试数据源连接
     async testConnection(id: number): Promise<ApiResponse<boolean>> {
         const response = await axios.post<ApiResponse<boolean>>(`${API_BASE_URL}/${id}/test`);
+        return response.data;
+    }
+
+    // 7. 创建文件数据源
+    async createFileDatasource(datasource: Datasource): Promise<ApiResponse<Datasource>> {
+        const response = await axios.post<ApiResponse<Datasource>>(`${API_BASE_URL}/file`, datasource);
+        return response.data;
+    }
+
+    // 8. 上传数据文件
+    async uploadDataset(file: File): Promise<any> {
+        const formData = new FormData();
+        formData.append('file', file);
+        const response = await axios.post('/api/upload/dataset', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data'
+            }
+        });
         return response.data;
     }
 
